@@ -1,0 +1,19 @@
+{
+    "configurations": [
+        {
+            "name": "ndk",
+            "includePath": [
+                "${workspaceFolder}/jni/**",
+                "D:/android-ndk-r16b/sysroot/usr/include/**",
+                "D:/android-ndk-r16b/sources/cxx-stl/gnu-libstdc++/4.9/include/**"
+            ],
+            "defines": [
+                ""
+            ],
+            "cStandard": "c11",
+            "cppStandard": "c++14",
+            "intelliSenseMode": "gcc-x64"
+        }
+    ],
+    "version": 4
+}
