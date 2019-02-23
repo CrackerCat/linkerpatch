@@ -86,7 +86,7 @@ static ExecutableSection* findSectionByName(const char* name)
 static void patchLinker()
 {
 	int addrAccessible = advance_dlsym((char*)"/system/bin/linker", "__dl__ZN19android_namespace_t13is_accessibleERKNSt3__112basic_stringIcNS0_11char_traitsIcEENS0_9allocatorIcEEEE");
-    if (addrAccessible > 0)
+	if (addrAccessible > 0)
 	{
 		if (addrAccessible % 4 != 0)
 		{
@@ -103,7 +103,7 @@ static void patchLinker()
 	int addrGreylisted = advance_dlsym((char*)"/system/bin/linker", "__dl__ZL13is_greylistedPKcPK6soinfo");
 	if (addrGreylisted == 0)
 	{
-        if (addrGreylisted % 4 != 0)
+		if (addrGreylisted % 4 != 0)
 		{
         	addrGreylisted--;
 		}
