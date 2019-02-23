@@ -89,9 +89,9 @@ static void patchLinker()
     if (addrAccessible > 0)
 	{
 		if (addrAccessible % 4 != 0)
-    	{
+		{
         	addrAccessible--;
-    	}
+		}
 
 		if (mprotect((void*)PAGE_START(addrAccessible), PAGE_SIZE*2, PROT_EXEC | PROT_WRITE | PROT_READ) == 0)
 		{
@@ -102,18 +102,18 @@ static void patchLinker()
 
 	int addrGreylisted = advance_dlsym((char*)"/system/bin/linker", "__dl__ZL13is_greylistedPKcPK6soinfo");
 	if (addrGreylisted == 0)
-    {
+	{
         if (addrGreylisted % 4 != 0)
-    	{
+		{
         	addrGreylisted--;
-    	}
+		}
 
 		if (mprotect((void*)PAGE_START(addrGreylisted), PAGE_SIZE*2, PROT_EXEC | PROT_WRITE | PROT_READ) == 0)
 		{
 			*(int*)addrGreylisted = 0x47702001;
 			cache_flush(addrGreylisted, addrGreylisted+4);
 		}
-    }
+	}
 }
 
 extern "C" void addHook(const char* src, const char* dst)
