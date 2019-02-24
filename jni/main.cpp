@@ -176,7 +176,8 @@ extern "C" void initLinkerPatch()
 	}
 	inited = true;
 
-	LOGD("initLinkerPatch...");
+	LOGD("initLinkerPatch............");
+	return;
 
 	patchLinker();
 
@@ -192,17 +193,17 @@ extern "C" void initLinkerPatch()
 	
 }
 
-JNIEXPORT void Java_io_virtualapp_linker_Patch_addHook(JNIEnv *env, jclass clazz, jstring src, jstring dst)
+extern "C" JNIEXPORT void JNICALL Java_io_virtualapp_linker_Patch_addHook(JNIEnv *env, jclass clazz, jstring src, jstring dst)
 {
 	addHook(env->GetStringUTFChars(src, nullptr), env->GetStringUTFChars(dst, nullptr));
 }
 
-JNIEXPORT void Java_io_virtualapp_linker_Patch_delHook(JNIEnv *env, jclass clazz, jstring src)
+extern "C" JNIEXPORT void JNICALL Java_io_virtualapp_linker_Patch_delHook(JNIEnv *env, jclass clazz, jstring src)
 {
 	delHook(env->GetStringUTFChars(src, nullptr));
 }
 
-JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *jvm, void *reserved) 
+extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *jvm, void *reserved) 
 {
 	JNIEnv *env = NULL;
 	jint result = -1;
