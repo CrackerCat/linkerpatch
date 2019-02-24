@@ -121,6 +121,7 @@ extern "C" void addHook(const char* src, const char* dst)
 	if (dictHook.find(src) == dictHook.end())
 	{
 		dictHook[src] = dst;
+		LOGD("add hook %s->%s", src, dst);
 	}
 }
 
@@ -131,6 +132,7 @@ extern "C" void delHook(const char* src)
 		if (it->first == src)
 		{
 			dictHook.erase(src);
+			LOGD("del hook %s", src);
 			break;
 		}
 	}
@@ -183,6 +185,11 @@ extern "C" void initLinkerPatch()
 	{
 		MSHookFunction((void*)addrDoOpen, (void*)myDoOpen, (void**)&oldDoOpen);
 	}
+	else
+	{
+		LOGD("error: not found do_dlopen!");
+	}
+	
 }
 
 JNIEXPORT void Java_io_virtualapp_linker_Patch_addHook(JNIEnv *env, jclass clazz, jstring src, jstring dst)
