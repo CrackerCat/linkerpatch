@@ -85,7 +85,7 @@ static CodeSection* findSectionByName(const char* name)
 
 static void patchLinker()
 {
-	int addrAccessible = advance_dlsym((char*)"/system/bin/linker", "__dl__ZN19android_namespace_t13is_accessibleERKNSt3__112basic_stringIcNS0_11char_traitsIcEENS0_9allocatorIcEEEE");
+	int addrAccessible = advance_dlsym("/system/bin/linker", "__dl__ZN19android_namespace_t13is_accessibleERKNSt3__112basic_stringIcNS0_11char_traitsIcEENS0_9allocatorIcEEEE");
 	if (addrAccessible > 0)
 	{
 		if (addrAccessible % 4 != 0)
@@ -100,7 +100,7 @@ static void patchLinker()
 		}
 	}
 
-	int addrGreylisted = advance_dlsym((char*)"/system/bin/linker", "__dl__ZL13is_greylistedPKcPK6soinfo");
+	int addrGreylisted = advance_dlsym("/system/bin/linker", "__dl__ZL13is_greylistedPKcPK6soinfo");
 	if (addrGreylisted == 0)
 	{
 		if (addrGreylisted % 4 != 0)
@@ -183,6 +183,16 @@ extern "C" void initLinkerPatch()
 	{
 		MSHookFunction((void*)addrDoOpen, (void*)myDoOpen, (void**)&oldDoOpen);
 	}
+}
+
+JNIEXPORT void Java_io_virtualapp_linker_Patch_addHook(JNIEnv *env, jclass clazz, jstring src, jstring dst)
+{
+	addHook(env->GetStringUTFChars(src, nullptr), env->GetStringUTFChars(dst, nullptr));
+}
+
+JNIEXPORT void Java_io_virtualapp_linker_Patch_delHook(JNIEnv *env, jclass clazz, jstring src)
+{
+	delHook(env->GetStringUTFChars(src, nullptr));
 }
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *jvm, void *reserved) 
