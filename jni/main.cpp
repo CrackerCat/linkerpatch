@@ -141,6 +141,16 @@ extern "C" void delHook(const char* src)
 static void* (*oldDoOpen)(const char* name, int flags, const void* extinfo, void* caller_addr) = nullptr;
 static void* myDoOpen(const char* name, int flags, const void* extinfo, void* caller_addr)
 {
+	auto callerSection = findSectionByAddr((uint32_t)caller_addr);
+	if (callerSection != nullptr)
+	{
+		LOGD("do_dlopen %s from %s(%p)", name, callerSection->FilePath.c_str(), caller_addr);
+	}
+	else
+	{
+		LOGD("do_dlopen %s from %p", name, caller_addr);
+	}
+	
 	for (auto it = dictHook.begin(); it != dictHook.end(); it++)
 	{
 		if (strstr(it->first.c_str(), name) != nullptr)
@@ -176,8 +186,7 @@ extern "C" void initLinkerPatch()
 	}
 	inited = true;
 
-	LOGD("initLinkerPatch............");
-	return;
+	LOGD("initLinkerPatch...");
 
 	patchLinker();
 
