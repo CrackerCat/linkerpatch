@@ -10,10 +10,6 @@ extern "C" void addHook(const char* src, const char* dst);
 
 extern "C" void delHook(const char* src);
 
-extern "C" void clearHook();
-
-extern "C" const char* findHook(const char* name);
-
 extern "C" void initLinkerPatch();
 
 功能说明：
