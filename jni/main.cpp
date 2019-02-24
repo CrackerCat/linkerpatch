@@ -6,7 +6,7 @@
 #include <unistd.h>
 #include <regex>
 #include <vector>
-#include <map>
+#include <tuple>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <logger/logger.h>
@@ -17,8 +17,8 @@
 #define PAGE_START(addr) (~(PAGE_SIZE - 1) & (addr))
 #define ALIGN(x,a) (((x)+(a)-1)&~(a-1))
 
-static std::map<std::string, std::string> dictHook;
-static std::map<std::string, std::string> dictHijack;
+static std::vector<std::tuple<std::string, std::string, std::string>> allHook;		// src, dst, cond
+static std::vector<std::tuple<std::string, std::string, std::string>> allHijack;	// src, dst, cond
 
 struct CodeSection
 {
@@ -117,44 +117,62 @@ static void patchLinker()
 	}
 }
 
-extern "C" void addHook(const char* src, const char* dst)
+extern "C" void addHook(const char* src, const char* dst, const char* cond)
 {
-	if (dictHook.find(src) == dictHook.end())
+	bool found = false;
+	for (auto it = allHook.begin(); it != allHook.end(); it++)
 	{
-		dictHook[src] = dst;
-		LOGD("add hook %s->%s", src, dst);
+		if (std::get<0>(*it) == src)
+		{
+			found = true;
+			break;
+		}
+	}
+	if (!found)
+	{
+		LOGD("add hook %s %s %s", src, dst, cond);
+		allHook.push_back(std::make_tuple(src, dst, cond));
 	}
 }
 
 extern "C" void delHook(const char* src)
 {
-	for (auto it = dictHook.begin(); it != dictHook.end(); it++)
+	for (auto it = allHook.begin(); it != allHook.end(); it++)
 	{
-		if (it->first == src)
+		if (std::get<0>(*it) == src)
 		{
-			dictHook.erase(src);
+			allHook.erase(it);
 			LOGD("del hook %s", src);
 			break;
 		}
 	}
 }
 
-extern "C" void addHijack(const char* src, const char* dst)
+extern "C" void addHijack(const char* src, const char* dst, const char* cond)
 {
-	if (dictHijack.find(src) == dictHijack.end())
+	bool found = false;
+	for (auto it = allHijack.begin(); it != allHijack.end(); it++)
 	{
-		dictHijack[src] = dst;
-		LOGD("add hijack %s->%s", src, dst);
+		if (std::get<0>(*it) == src)
+		{
+			found = true;
+			break;
+		}
+	}
+	if (!found)
+	{
+		LOGD("add hijack %s %s %s", src, dst, cond);
+		allHijack.push_back(std::make_tuple(src, dst, cond));
 	}
 }
 
 extern "C" void delHijack(const char* src)
 {
-	for (auto it = dictHijack.begin(); it != dictHijack.end(); it++)
+	for (auto it = allHijack.begin(); it != allHijack.end(); it++)
 	{
-		if (it->first == src)
+		if (std::get<0>(*it) == src)
 		{
-			dictHijack.erase(src);
+			allHijack.erase(it);
 			LOGD("del hijack %s", src);
 			break;
 		}
@@ -175,33 +193,54 @@ static void* myDoOpen(const char* name, int flags, const void* extinfo, void* ca
 	}
 
 	// hijack
-	for (auto it = dictHijack.begin(); it != dictHijack.end(); it++)
+	for (auto it = allHijack.begin(); it != allHijack.end(); it++)
 	{
-		if (strstr(it->first.c_str(), name) != nullptr)
+		auto src = std::get<0>(*it).c_str();
+		auto dst = std::get<1>(*it).c_str();
+		auto cond = std::get<2>(*it).c_str();
+
+		if (callerSection != nullptr && !std::regex_match(callerSection->FilePath, std::regex(cond)))
 		{
-			LOGD("hijack: %s->%s", name, it->second.c_str());
-			name = it->second.c_str();
+			continue;
+		}
+
+		if (strstr(name, src) != nullptr)
+		{
+			LOGD("hijack: %s->%s", name, dst);
+			name = dst;
 			break;
 		}
 	}
-	
+
 	// hook
-	for (auto it = dictHook.begin(); it != dictHook.end(); it++)
+	for (auto it = allHook.begin(); it != allHook.end(); it++)
 	{
-		if (strstr(it->first.c_str(), name) != nullptr)
+		auto src = std::get<0>(*it).c_str();
+		auto dst = std::get<1>(*it).c_str();
+		auto cond = std::get<2>(*it).c_str();
+
+		if (callerSection != nullptr && !std::regex_match(callerSection->FilePath, std::regex(cond)))
 		{
-			auto dst = it->second.c_str();
+			continue;
+		}
+
+		if (strstr(name, src) != nullptr)
+		{
 			auto section = findSectionByName(dst);
 			if (section != nullptr)
 			{
-				auto new_caller = section->StartAddr + 1;
-				LOGD("hook: do_dlopen %s use %s(%x)", name, dst, new_caller);
-				return oldDoOpen(name, flags, nullptr, (void*)new_caller);
+				auto newCaller = section->StartAddr + 1;
+				LOGD("hook: do_dlopen %s use %s(%x)", name, dst, newCaller);
+				return oldDoOpen(name, flags, nullptr, (void*)newCaller);
+			}
+			else
+			{
+				LOGD("hook: do_dlopen %s can't use %s", name, dst);
+				break;
 			}
 		}
-		else if (strstr(it->second.c_str(), name) != nullptr)
+		else if (strstr(name, dst) != nullptr)
 		{
-			auto src = it->first.c_str();
 			LOGD("hook: do_dlopen %s then do_dlopen %s", name, src);
 			auto ret = oldDoOpen(name, flags, extinfo, caller_addr);
 			oldDoOpen(src, flags, extinfo, caller_addr);
@@ -234,12 +273,11 @@ extern "C" void initLinkerPatch()
 	{
 		LOGD("error: not found do_dlopen!");
 	}
-	
 }
 
-extern "C" JNIEXPORT void JNICALL Java_io_virtualapp_linker_Patch_addHijack(JNIEnv *env, jclass clazz, jstring src, jstring dst)
+extern "C" JNIEXPORT void JNICALL Java_io_virtualapp_linker_Patch_addHijack(JNIEnv *env, jclass clazz, jstring src, jstring dst, jstring cond)
 {
-	addHijack(env->GetStringUTFChars(src, nullptr), env->GetStringUTFChars(dst, nullptr));
+	addHijack(env->GetStringUTFChars(src, nullptr), env->GetStringUTFChars(dst, nullptr), env->GetStringUTFChars(cond, nullptr));
 }
 
 extern "C" JNIEXPORT void JNICALL Java_io_virtualapp_linker_Patch_delHijack(JNIEnv *env, jclass clazz, jstring src)
@@ -247,9 +285,9 @@ extern "C" JNIEXPORT void JNICALL Java_io_virtualapp_linker_Patch_delHijack(JNIE
 	delHijack(env->GetStringUTFChars(src, nullptr));
 }
 
-extern "C" JNIEXPORT void JNICALL Java_io_virtualapp_linker_Patch_addHook(JNIEnv *env, jclass clazz, jstring src, jstring dst)
+extern "C" JNIEXPORT void JNICALL Java_io_virtualapp_linker_Patch_addHook(JNIEnv *env, jclass clazz, jstring src, jstring dst, jstring cond)
 {
-	addHook(env->GetStringUTFChars(src, nullptr), env->GetStringUTFChars(dst, nullptr));
+	addHook(env->GetStringUTFChars(src, nullptr), env->GetStringUTFChars(dst, nullptr), env->GetStringUTFChars(cond, nullptr));
 }
 
 extern "C" JNIEXPORT void JNICALL Java_io_virtualapp_linker_Patch_delHook(JNIEnv *env, jclass clazz, jstring src)
