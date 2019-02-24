@@ -18,6 +18,7 @@
 #define ALIGN(x,a) (((x)+(a)-1)&~(a-1))
 
 static std::map<std::string, std::string> dictHook;
+static std::map<std::string, std::string> dictHijack;
 
 struct CodeSection
 {
@@ -138,6 +139,28 @@ extern "C" void delHook(const char* src)
 	}
 }
 
+extern "C" void addHijack(const char* src, const char* dst)
+{
+	if (dictHijack.find(src) == dictHijack.end())
+	{
+		dictHijack[src] = dst;
+		LOGD("add hijack %s->%s", src, dst);
+	}
+}
+
+extern "C" void delHijack(const char* src)
+{
+	for (auto it = dictHijack.begin(); it != dictHijack.end(); it++)
+	{
+		if (it->first == src)
+		{
+			dictHijack.erase(src);
+			LOGD("del hijack %s", src);
+			break;
+		}
+	}
+}
+
 static void* (*oldDoOpen)(const char* name, int flags, const void* extinfo, void* caller_addr) = nullptr;
 static void* myDoOpen(const char* name, int flags, const void* extinfo, void* caller_addr)
 {
@@ -150,7 +173,18 @@ static void* myDoOpen(const char* name, int flags, const void* extinfo, void* ca
 	{
 		LOGD("do_dlopen %s from %p", name, caller_addr);
 	}
+
+	// hijack
+	for (auto it = dictHijack.begin(); it != dictHijack.end(); it++)
+	{
+		if (strstr(it->first.c_str(), name) != nullptr)
+		{
+			name = it->second.c_str();
+			break;
+		}
+	}
 	
+	// hook
 	for (auto it = dictHook.begin(); it != dictHook.end(); it++)
 	{
 		if (strstr(it->first.c_str(), name) != nullptr)
@@ -200,6 +234,16 @@ extern "C" void initLinkerPatch()
 		LOGD("error: not found do_dlopen!");
 	}
 	
+}
+
+extern "C" JNIEXPORT void JNICALL Java_io_virtualapp_linker_Patch_addHijack(JNIEnv *env, jclass clazz, jstring src, jstring dst)
+{
+	addHijack(env->GetStringUTFChars(src, nullptr), env->GetStringUTFChars(dst, nullptr));
+}
+
+extern "C" JNIEXPORT void JNICALL Java_io_virtualapp_linker_Patch_delHijack(JNIEnv *env, jclass clazz, jstring src)
+{
+	delHijack(env->GetStringUTFChars(src, nullptr));
 }
 
 extern "C" JNIEXPORT void JNICALL Java_io_virtualapp_linker_Patch_addHook(JNIEnv *env, jclass clazz, jstring src, jstring dst)
