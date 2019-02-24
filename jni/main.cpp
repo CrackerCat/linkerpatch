@@ -19,14 +19,14 @@
 
 static std::map<std::string, std::string> dictHook;
 
-struct ExecutableSection
+struct CodeSection
 {
 	uint32_t StartAddr;
 	uint32_t EndAddr;
 	std::string FilePath;
 };
 
-static void refreshMap(std::vector<ExecutableSection>& sectionMap)
+static void refreshMap(std::vector<CodeSection>& sectionMap)
 {
 	auto fp = fopen("/proc/self/maps", "r");
 	if (fp == nullptr)
@@ -42,7 +42,7 @@ static void refreshMap(std::vector<ExecutableSection>& sectionMap)
 		std::smatch matched;
 		if (std::regex_match(std::string(line), matched, pattern))
 		{
-			ExecutableSection item{};
+			CodeSection item{};
 			item.FilePath = matched[3].str();
 			sscanf(matched[1].str().c_str(), "%x", &item.StartAddr);
 			sscanf(matched[2].str().c_str(), "%x", &item.EndAddr);
@@ -53,9 +53,9 @@ static void refreshMap(std::vector<ExecutableSection>& sectionMap)
 	fclose(fp);
 }
 
-static ExecutableSection* findSectionByAddr(uint32_t addr)
+static CodeSection* findSectionByAddr(uint32_t addr)
 {
-	std::vector<ExecutableSection> sectionMap;
+	std::vector<CodeSection> sectionMap;
 	refreshMap(sectionMap);
 	for(size_t i = 0; i < sectionMap.size(); i++)
 	{
@@ -68,9 +68,9 @@ static ExecutableSection* findSectionByAddr(uint32_t addr)
 	return nullptr;
 }
 
-static ExecutableSection* findSectionByName(const char* name)
+static CodeSection* findSectionByName(const char* name)
 {
-	std::vector<ExecutableSection> sectionMap;
+	std::vector<CodeSection> sectionMap;
 	refreshMap(sectionMap);
 	for(size_t i = 0; i < sectionMap.size(); i++)
 	{
@@ -136,45 +136,38 @@ extern "C" void delHook(const char* src)
 	}
 }
 
-extern "C" void clearHook()
-{
-	dictHook.clear();
-}
-
-extern "C" const char* findHook(const char* name)
+static void* (*oldDoOpen)(const char* name, int flags, const void* extinfo, void* caller_addr) = nullptr;
+static void* myDoOpen(const char* name, int flags, const void* extinfo, void* caller_addr)
 {
 	for (auto it = dictHook.begin(); it != dictHook.end(); it++)
 	{
 		if (strstr(it->first.c_str(), name) != nullptr)
 		{
-			return it->second.c_str();
+			auto dst = it->second.c_str();
+			auto section = findSectionByName(dst);
+			if (section != nullptr)
+			{
+				auto new_caller = section->StartAddr + 1;
+				LOGD("do_dlopen %s use %s(%x)", name, dst, new_caller);
+				return oldDoOpen(name, flags, nullptr, (void*)new_caller);
+			}
 		}
-	}
-
-	return nullptr;
-}
-
-static void* (*oldDoOpen)(const char* name, int flags, const void* extinfo, void* caller_addr) = nullptr;
-static void* myDoOpen(const char* name, int flags, const void* extinfo, void* caller_addr)
-{
-	//LOGD("dlopen %s %p %p from %s", name, extinfo, caller_addr, findSectionByName("libc.so")->FilePath.c_str());
-	auto dst = findHook(name);
-	if (dst != nullptr)
-	{
-		auto section = findSectionByName(dst);
-		if (section != nullptr)
+		else if (strstr(it->second.c_str(), name) != nullptr)
 		{
-			auto new_caller = section->StartAddr + 1;
-			LOGD("do_dlopen %s use %s(%x)", name, dst, new_caller);
-			return oldDoOpen(name, flags, nullptr, (void*)new_caller);
+			auto src = it->first.c_str();
+			LOGD("do_dlopen %s then do_dlopen %s", name, src);
+			auto ret = oldDoOpen(name, flags, extinfo, caller_addr);
+			oldDoOpen(src, flags, extinfo, caller_addr);
+			return ret;
 		}
 	}
+
 	return oldDoOpen(name, flags, extinfo, caller_addr);
 }
 
-static bool inited=false;
 extern "C" void initLinkerPatch()
 {
+	static bool inited=false;
 	if (inited)
 	{
 		return;
