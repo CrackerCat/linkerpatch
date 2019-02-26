@@ -251,7 +251,7 @@ static void* myDoOpen(const char* name, int flags, const void* extinfo, void* ca
 	return oldDoOpen(name, flags, extinfo, caller_addr);
 }
 
-extern "C" void initLinkerPatch()
+extern "C" __attribute__((constructor)) void initLinkerPatch()
 {
 	static bool inited=false;
 	if (inited)
