@@ -17,12 +17,6 @@
 #define PAGE_START(addr) (~(PAGE_SIZE - 1) & (addr))
 #define ALIGN(x,a) (((x)+(a)-1)&~(a-1))
 
-<<<<<<< HEAD
-=======
-static std::map<std::string, std::string> dictHook;
-static std::map<std::string, std::string> dictHijack;
-
->>>>>>> db407ab0e305e4ea6c85114518b45c2ea9d52d4e
 struct CodeSection
 {
 	uint32_t StartAddr;
@@ -171,7 +165,6 @@ extern "C" void delHook(const char* src)
 	}
 }
 
-<<<<<<< HEAD
 extern "C" void addHijack(const char* src, const char* dst, const char* cond)
 {
 	bool found = false;
@@ -187,39 +180,22 @@ extern "C" void addHijack(const char* src, const char* dst, const char* cond)
 	{
 		LOGD("add hijack %s %s %s", src, dst, cond);
 		allHijack.push_back(std::make_tuple(src, dst, cond));
-=======
-extern "C" void addHijack(const char* src, const char* dst)
-{
-	if (dictHijack.find(src) == dictHijack.end())
-	{
-		dictHijack[src] = dst;
-		LOGD("add hijack %s->%s", src, dst);
->>>>>>> db407ab0e305e4ea6c85114518b45c2ea9d52d4e
 	}
 }
 
 extern "C" void delHijack(const char* src)
 {
-<<<<<<< HEAD
 	for (auto it = allHijack.begin(); it != allHijack.end(); it++)
 	{
 		if (std::get<0>(*it) == src)
 		{
 			allHijack.erase(it);
-=======
-	for (auto it = dictHijack.begin(); it != dictHijack.end(); it++)
-	{
-		if (it->first == src)
-		{
-			dictHijack.erase(src);
->>>>>>> db407ab0e305e4ea6c85114518b45c2ea9d52d4e
 			LOGD("del hijack %s", src);
 			break;
 		}
 	}
 }
 
-<<<<<<< HEAD
 extern "C" void addTrampoline(const char* srcSo, const char* srcSym, const char* dstSo, const char* dstSym, const char* cond)
 {
 	bool found = false;
@@ -251,9 +227,6 @@ extern "C" void delTrampoline(const char* srcSo, const char* srcSym)
 	}
 }
 
-=======
-static void* (*oldDoOpen)(const char* name, int flags, const void* extinfo, void* caller_addr) = nullptr;
->>>>>>> db407ab0e305e4ea6c85114518b45c2ea9d52d4e
 static void* myDoOpen(const char* name, int flags, const void* extinfo, void* caller_addr)
 {
 	refreshMap();
@@ -269,7 +242,6 @@ static void* myDoOpen(const char* name, int flags, const void* extinfo, void* ca
 	}
 
 	// hijack
-<<<<<<< HEAD
 	for (auto it = allHijack.begin(); it != allHijack.end(); it++)
 	{
 		auto src = std::get<0>(*it).c_str();
@@ -291,19 +263,6 @@ static void* myDoOpen(const char* name, int flags, const void* extinfo, void* ca
 
 	// hook
 	for (auto it = allHook.begin(); it != allHook.end(); it++)
-=======
-	for (auto it = dictHijack.begin(); it != dictHijack.end(); it++)
-	{
-		if (strstr(it->first.c_str(), name) != nullptr)
-		{
-			name = it->second.c_str();
-			break;
-		}
-	}
-	
-	// hook
-	for (auto it = dictHook.begin(); it != dictHook.end(); it++)
->>>>>>> db407ab0e305e4ea6c85114518b45c2ea9d52d4e
 	{
 		auto src = std::get<0>(*it).c_str();
 		auto dst = std::get<1>(*it).c_str();
@@ -452,21 +411,7 @@ extern "C" JNIEXPORT void JNICALL Java_io_virtualapp_linker_Patch_addHijack(JNIE
 	addHijack(env->GetStringUTFChars(src, nullptr), env->GetStringUTFChars(dst, nullptr), env->GetStringUTFChars(cond, nullptr));
 }
 
-<<<<<<< HEAD
 extern "C" JNIEXPORT void JNICALL Java_io_virtualapp_linker_Patch_delHijack(JNIEnv *env, jclass clazz, jstring src)
-=======
-extern "C" JNIEXPORT void JNICALL Java_io_virtualapp_linker_Patch_addHijack(JNIEnv *env, jclass clazz, jstring src, jstring dst)
-{
-	addHijack(env->GetStringUTFChars(src, nullptr), env->GetStringUTFChars(dst, nullptr));
-}
-
-extern "C" JNIEXPORT void JNICALL Java_io_virtualapp_linker_Patch_delHijack(JNIEnv *env, jclass clazz, jstring src)
-{
-	delHijack(env->GetStringUTFChars(src, nullptr));
-}
-
-extern "C" JNIEXPORT void JNICALL Java_io_virtualapp_linker_Patch_addHook(JNIEnv *env, jclass clazz, jstring src, jstring dst)
->>>>>>> db407ab0e305e4ea6c85114518b45c2ea9d52d4e
 {
 	delHijack(env->GetStringUTFChars(src, nullptr));
 }
