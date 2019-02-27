@@ -17,18 +17,25 @@
 #define PAGE_START(addr) (~(PAGE_SIZE - 1) & (addr))
 #define ALIGN(x,a) (((x)+(a)-1)&~(a-1))
 
-static std::vector<std::tuple<std::string, std::string, std::string>> allHook;		// src, dst, cond
-static std::vector<std::tuple<std::string, std::string, std::string>> allHijack;	// src, dst, cond
-
 struct CodeSection
 {
 	uint32_t StartAddr;
 	uint32_t EndAddr;
+	void* Handle;
 	std::string FilePath;
 };
 
-static void refreshMap(std::vector<CodeSection>& sectionMap)
+static std::vector<CodeSection> sectionMap;
+static std::vector<std::tuple<std::string, std::string, std::string>> allHook;		// src, dst, cond
+static std::vector<std::tuple<std::string, std::string, std::string>> allHijack;	// src, dst, cond
+static std::vector<std::tuple<std::string, std::string, std::string, std::string, std::string>> allTrampoline;	// src_so, src_sym, dst_so, dst_sym, cond
+static void* (*oldDoOpen)(const char* name, int flags, const void* extinfo, void* caller_addr) = nullptr;
+static bool (*oldDoDlsym)(void* handle, const char* sym_name, const char* sym_ver, void* caller_addr, void** symbol) = nullptr;
+
+static void refreshMap()
 {
+	sectionMap.clear();
+
 	auto fp = fopen("/proc/self/maps", "r");
 	if (fp == nullptr)
 	{
@@ -39,7 +46,7 @@ static void refreshMap(std::vector<CodeSection>& sectionMap)
 	while (fgets(line, sizeof(line), fp))
 	{
 		line[strlen(line)-1] = 0x00;
-		static std::regex pattern("^([0-9a-z]+)-([0-9a-z]+)\\s+r[w-]xp.*?(\\/.*)");
+		static std::regex pattern("^([0-9a-z]+)-([0-9a-z]+)\\s+r[w-]x[ps].*?(\\/.*)");
 		std::smatch matched;
 		if (std::regex_match(std::string(line), matched, pattern))
 		{
@@ -47,6 +54,7 @@ static void refreshMap(std::vector<CodeSection>& sectionMap)
 			item.FilePath = matched[3].str();
 			sscanf(matched[1].str().c_str(), "%x", &item.StartAddr);
 			sscanf(matched[2].str().c_str(), "%x", &item.EndAddr);
+			item.Handle = oldDoOpen(item.FilePath.c_str(), RTLD_LAZY, nullptr, (void*)(item.StartAddr+1));
 			sectionMap.push_back(item);
 		}
 	}
@@ -56,8 +64,6 @@ static void refreshMap(std::vector<CodeSection>& sectionMap)
 
 static CodeSection* findSectionByAddr(uint32_t addr)
 {
-	std::vector<CodeSection> sectionMap;
-	refreshMap(sectionMap);
 	for(size_t i = 0; i < sectionMap.size(); i++)
 	{
 		if (sectionMap[i].StartAddr <= addr && sectionMap[i].EndAddr >= addr)
@@ -71,11 +77,22 @@ static CodeSection* findSectionByAddr(uint32_t addr)
 
 static CodeSection* findSectionByName(const char* name)
 {
-	std::vector<CodeSection> sectionMap;
-	refreshMap(sectionMap);
 	for(size_t i = 0; i < sectionMap.size(); i++)
 	{
 		if (strstr(sectionMap[i].FilePath.c_str(), name) != nullptr)
+		{
+			return &sectionMap[i];
+		}
+	}
+	
+	return nullptr;
+}
+
+static CodeSection* findSectionByHandle(void* handle)
+{
+	for(size_t i = 0; i < sectionMap.size(); i++)
+	{
+		if (sectionMap[i].Handle == handle)
 		{
 			return &sectionMap[i];
 		}
@@ -179,9 +196,41 @@ extern "C" void delHijack(const char* src)
 	}
 }
 
-static void* (*oldDoOpen)(const char* name, int flags, const void* extinfo, void* caller_addr) = nullptr;
+extern "C" void addTrampoline(const char* srcSo, const char* srcSym, const char* dstSo, const char* dstSym, const char* cond)
+{
+	bool found = false;
+	for (auto it = allTrampoline.begin(); it != allTrampoline.end(); it++)
+	{
+		if (std::get<0>(*it) == srcSo && std::get<1>(*it) == srcSym)
+		{
+			found = true;
+			break;
+		}
+	}
+	if (!found)
+	{
+		LOGD("add trampoline %s:%s to %s:%s on condition %s", srcSo, srcSym, dstSo, dstSym, cond);
+		allTrampoline.push_back(std::make_tuple(srcSo, srcSym, dstSo, dstSym, cond));
+	}
+}
+
+extern "C" void delTrampoline(const char* srcSo, const char* srcSym)
+{
+	for (auto it = allTrampoline.begin(); it != allTrampoline.end(); it++)
+	{
+		if (std::get<0>(*it) == srcSo && std::get<1>(*it) == srcSym)
+		{
+			allTrampoline.erase(it);
+			LOGD("del trampoline %s:%s", srcSo, srcSym);
+			break;
+		}
+	}
+}
+
 static void* myDoOpen(const char* name, int flags, const void* extinfo, void* caller_addr)
 {
+	refreshMap();
+
 	auto callerSection = findSectionByAddr((uint32_t)caller_addr);
 	if (callerSection != nullptr)
 	{
@@ -231,7 +280,9 @@ static void* myDoOpen(const char* name, int flags, const void* extinfo, void* ca
 			{
 				auto newCaller = section->StartAddr + 1;
 				LOGD("hook: do_dlopen %s use %s(%x)", name, dst, newCaller);
-				return oldDoOpen(name, flags, nullptr, (void*)newCaller);
+				auto ret = oldDoOpen(name, flags, nullptr, (void*)newCaller);
+				refreshMap();
+				return ret;
 			}
 			else
 			{
@@ -244,11 +295,81 @@ static void* myDoOpen(const char* name, int flags, const void* extinfo, void* ca
 			LOGD("hook: do_dlopen %s then do_dlopen %s", name, src);
 			auto ret = oldDoOpen(name, flags, extinfo, caller_addr);
 			oldDoOpen(src, flags, extinfo, caller_addr);
+			refreshMap();
 			return ret;
 		}
 	}
 
-	return oldDoOpen(name, flags, extinfo, caller_addr);
+	auto ret = oldDoOpen(name, flags, extinfo, caller_addr);
+	refreshMap();
+	return ret;
+}
+
+static bool myDoDlsym(void* handle, const char* sym_name, const char* sym_ver, void* caller_addr, void** symbol)
+{
+	LOGD("do_dlsym %s from %p", sym_name, caller_addr);
+	CodeSection* callerSection = nullptr;
+	CodeSection* calleeSection = nullptr;
+	CodeSection* dstSection = nullptr;
+	for (auto it = allTrampoline.begin(); it != allTrampoline.end(); it++)
+	{
+		auto srcSo = std::get<0>(*it).c_str();
+		auto srcSym = std::get<1>(*it).c_str();
+		auto dstSo = std::get<2>(*it).c_str();
+		auto dstSym = std::get<3>(*it).c_str();
+		auto cond = std::get<4>(*it).c_str();
+
+		// check srcSym
+		if (strstr(sym_name, srcSym) == nullptr)
+		{
+			continue;
+		}
+		// check cond
+		if (callerSection == nullptr)
+		{
+			callerSection = findSectionByAddr((uint32_t)caller_addr);
+		}
+		if (callerSection == nullptr)
+		{
+			break;
+		}
+		if (!std::regex_match(callerSection->FilePath, std::regex(cond)))
+		{
+			continue;
+		}
+		// check srcSo
+		if (calleeSection == nullptr)
+		{
+			calleeSection = findSectionByHandle(handle);
+		}
+		if (calleeSection == nullptr)
+		{
+			break;
+		}
+		if (strstr(calleeSection->FilePath.c_str(), srcSo) == nullptr)
+		{
+			continue;
+		}
+		// check dstSo
+		if (dstSection == nullptr)
+		{
+			dstSection = findSectionByName(dstSo);
+		}
+		if (dstSection == nullptr)
+		{
+			LOGD("trampoline: %s:%s -> %s:%s from %s return false for dstSection NULL", calleeSection->FilePath.c_str(), sym_name, dstSo, dstSym, cond);
+			*symbol = nullptr;
+			return false;
+		}
+		
+		void* dstSymAddr = nullptr;
+		auto foundDstSym = oldDoDlsym(dstSection->Handle, dstSym, nullptr, (void*)(dstSection->StartAddr + 1), &dstSymAddr);
+		*symbol = dstSymAddr;
+		LOGD("trampoline: %s:%s -> %s:%s from %s return %d symbol %p", calleeSection->FilePath.c_str(), sym_name, dstSo, dstSym, cond, foundDstSym, dstSymAddr);
+		return foundDstSym;
+	}
+	
+	return oldDoDlsym(handle, sym_name, sym_ver, caller_addr, symbol);
 }
 
 extern "C" __attribute__((constructor)) void initLinkerPatch()
@@ -273,6 +394,16 @@ extern "C" __attribute__((constructor)) void initLinkerPatch()
 	{
 		LOGD("error: not found do_dlopen!");
 	}
+
+	int addrDoDlsym = advance_dlsym("/system/bin/linker", "__dl__Z8do_dlsymPvPKcS1_S_PS_");
+	if (addrDoDlsym != 0)
+	{
+		MSHookFunction((void*)addrDoDlsym, (void*)myDoDlsym, (void**)&oldDoDlsym);
+	}
+	else
+	{
+		LOGD("error: not found do_dlsym!");
+	}
 }
 
 extern "C" JNIEXPORT void JNICALL Java_io_virtualapp_linker_Patch_addHijack(JNIEnv *env, jclass clazz, jstring src, jstring dst, jstring cond)
@@ -295,12 +426,22 @@ extern "C" JNIEXPORT void JNICALL Java_io_virtualapp_linker_Patch_delHook(JNIEnv
 	delHook(env->GetStringUTFChars(src, nullptr));
 }
 
+extern "C" JNIEXPORT void JNICALL Java_io_virtualapp_linker_Patch_addTrampoline(JNIEnv *env, jclass clazz, jstring srcSo, jstring srcSym, jstring dstSo, jstring dstSym, jstring cond)
+{
+	addTrampoline(env->GetStringUTFChars(srcSo, nullptr), env->GetStringUTFChars(srcSym, nullptr), env->GetStringUTFChars(dstSo, nullptr), env->GetStringUTFChars(dstSym, nullptr), env->GetStringUTFChars(cond, nullptr));
+}
+
+extern "C" JNIEXPORT void JNICALL Java_io_virtualapp_linker_Patch_delTrampoline(JNIEnv *env, jclass clazz, jstring srcSo, jstring srcSym)
+{
+	delTrampoline(env->GetStringUTFChars(srcSo, nullptr), env->GetStringUTFChars(srcSym, nullptr));
+}
+
 extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *jvm, void *reserved) 
 {
 	JNIEnv *env = NULL;
 	jint result = -1;
 
-	if (jvm->GetEnv((void **)&env, JNI_VERSION_1_4) != JNI_OK) 
+	if (jvm->GetEnv((void **)&env, JNI_VERSION_1_4) != JNI_OK)
 	{
 		return -1;
 	}
