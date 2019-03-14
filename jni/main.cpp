@@ -54,7 +54,8 @@ static void refreshMap()
 			item.FilePath = matched[3].str();
 			sscanf(matched[1].str().c_str(), "%x", &item.StartAddr);
 			sscanf(matched[2].str().c_str(), "%x", &item.EndAddr);
-			item.Handle = oldDoOpen(item.FilePath.c_str(), RTLD_LAZY, nullptr, (void*)(item.StartAddr+1));
+			item.Handle = nullptr;
+			
 			sectionMap.push_back(item);
 		}
 	}
@@ -101,9 +102,21 @@ static CodeSection* findSectionByHandle(void* handle)
 	return nullptr;
 }
 
+static void setSectionHandleByName(const char* name, void* handle)
+{
+	for(size_t i = 0; i < sectionMap.size(); i++)
+	{
+		if (strstr(sectionMap[i].FilePath.c_str(), name) != nullptr)
+		{
+			sectionMap[i].Handle = handle;
+			break;
+		}
+	}
+}
+
 static void patchLinker()
 {
-	int addrAccessible = advance_dlsym("/system/bin/linker", "__dl__ZN19android_namespace_t13is_accessibleERKNSt3__112basic_stringIcNS0_11char_traitsIcEENS0_9allocatorIcEEEE");
+	int addrAccessible = advance_dlsym_fuzzy("/system/bin/linker", "is_accessible");
 	if (addrAccessible > 0)
 	{
 		if (addrAccessible % 4 != 0)
@@ -118,7 +131,7 @@ static void patchLinker()
 		}
 	}
 
-	int addrGreylisted = advance_dlsym("/system/bin/linker", "__dl__ZL13is_greylistedPKcPK6soinfo");
+	int addrGreylisted = advance_dlsym_fuzzy("/system/bin/linker", "is_greylisted");
 	if (addrGreylisted == 0)
 	{
 		if (addrGreylisted % 4 != 0)
@@ -282,6 +295,7 @@ static void* myDoOpen(const char* name, int flags, const void* extinfo, void* ca
 				LOGD("hook: do_dlopen %s use %s(%x)", name, dst, newCaller);
 				auto ret = oldDoOpen(name, flags, nullptr, (void*)newCaller);
 				refreshMap();
+				setSectionHandleByName(name, ret);
 				return ret;
 			}
 			else
@@ -294,14 +308,17 @@ static void* myDoOpen(const char* name, int flags, const void* extinfo, void* ca
 		{
 			LOGD("hook: do_dlopen %s then do_dlopen %s", name, src);
 			auto ret = oldDoOpen(name, flags, extinfo, caller_addr);
-			oldDoOpen(src, flags, extinfo, caller_addr);
+			auto pSrc = oldDoOpen(src, flags, extinfo, caller_addr);
 			refreshMap();
+			setSectionHandleByName(name, ret);
+			setSectionHandleByName(src, pSrc);
 			return ret;
 		}
 	}
 
 	auto ret = oldDoOpen(name, flags, extinfo, caller_addr);
 	refreshMap();
+	setSectionHandleByName(name, ret);
 	return ret;
 }
 
@@ -385,7 +402,7 @@ extern "C" __attribute__((constructor)) void initLinkerPatch()
 
 	patchLinker();
 
-	int addrDoOpen = advance_dlsym("/system/bin/linker", "__dl__Z9do_dlopenPKciPK17android_dlextinfoPv");
+	int addrDoOpen = advance_dlsym_fuzzy("/system/bin/linker", "do_dlopen");
 	if (addrDoOpen != 0)
 	{
 		MSHookFunction((void*)addrDoOpen, (void*)myDoOpen, (void**)&oldDoOpen);
@@ -395,7 +412,7 @@ extern "C" __attribute__((constructor)) void initLinkerPatch()
 		LOGD("error: not found do_dlopen!");
 	}
 
-	int addrDoDlsym = advance_dlsym("/system/bin/linker", "__dl__Z8do_dlsymPvPKcS1_S_PS_");
+	int addrDoDlsym = advance_dlsym_fuzzy("/system/bin/linker", "do_dlsym");
 	if (addrDoDlsym != 0)
 	{
 		MSHookFunction((void*)addrDoDlsym, (void*)myDoDlsym, (void**)&oldDoDlsym);
